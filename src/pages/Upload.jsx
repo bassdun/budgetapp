@@ -7,6 +7,8 @@ import { processTransactions } from '../utils/transactionUtils';
 import { detectBankFormat, parseTransaction, BANK_FORMATS } from '../utils/bankFormats';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
+import { FaFileCsv, FaFilePdf, FaUpload, FaTimes } from 'react-icons/fa';
+import { extractTextFromPDF, parseBankStatement, validateBankStatement } from '../utils/pdfUtils';
 
 function Upload() {
   const [user] = useAuthState(auth);
@@ -17,6 +19,8 @@ function Upload() {
   const [bankFormat, setBankFormat] = useState(null);
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [fileType, setFileType] = useState(null);
+  const [fileName, setFileName] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const handleDragOver = useCallback((e) => {
@@ -51,6 +55,7 @@ function Upload() {
     if (isCSV || isPDF) {
       setFile(file);
       setFileType(isCSV ? 'csv' : 'pdf');
+      setFileName(file.name);
       if (isCSV) {
         parseAndPreviewCSV(file);
       } else {
@@ -93,24 +98,37 @@ function Upload() {
   const extractAndPreviewPDF = useCallback(async (file) => {
     try {
       setIsProcessing(true);
-      // TODO: Implement PDF text extraction
-      // This would typically involve:
-      // 1. Using a PDF parsing library (e.g., pdf.js)
-      // 2. Extracting text content
-      // 3. Parsing the text to identify transactions
-      // 4. Converting to the same format as CSV transactions
+      const text = await extractTextFromPDF(file);
       
-      // For now, we'll show a message
-      toast.info('PDF processing is coming soon!');
-      setFile(null);
-      setFileType(null);
+      // Validate the bank statement format
+      if (!validateBankStatement(text, bankFormat)) {
+        toast.error('Invalid or unsupported bank statement format');
+        setFile(null);
+        setFileType(null);
+        return;
+      }
+      
+      const transactions = parseBankStatement(text, bankFormat);
+      
+      if (transactions.length === 0) {
+        toast.error('No transactions found in the PDF');
+        setFile(null);
+        setFileType(null);
+        return;
+      }
+      
+      setPreviewData(transactions);
+      setSelectedRows(new Set(transactions.map((_, index) => index)));
+      toast.success(`Successfully extracted ${transactions.length} transactions`);
     } catch (error) {
       console.error('Error processing PDF:', error);
-      toast.error('Error processing PDF file');
+      toast.error('Error processing PDF file: ' + error.message);
+      setFile(null);
+      setFileType(null);
     } finally {
       setIsProcessing(false);
     }
-  }, []);
+  }, [bankFormat]);
 
   const handleUpload = useCallback(async () => {
     if (!file || !user || !previewData) return;
@@ -193,7 +211,7 @@ function Upload() {
                   ) : (
                     <FiFile className="w-12 h-12 text-primary-600" />
                   )}
-                  <p className="text-lg font-medium">{file.name}</p>
+                  <p className="text-lg font-medium">{fileName}</p>
                   <p className="text-sm text-gray-500">
                     {fileType === 'csv' ? 'CSV File' : 'PDF File'}
                   </p>
@@ -302,6 +320,23 @@ function Upload() {
                 {isProcessing ? 'Processing...' : 'Import Selected Transactions'}
               </button>
             </div>
+
+            {fileType === 'pdf' && (
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                <p className="text-blue-700">
+                  PDF processing is now available! The system will attempt to extract transactions from your {bankFormat} bank statement.
+                  Please verify the extracted data before importing.
+                </p>
+                {isProcessing && (
+                  <div className="mt-2">
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700 mr-2"></div>
+                      <span className="text-blue-700">Processing PDF...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </main>
